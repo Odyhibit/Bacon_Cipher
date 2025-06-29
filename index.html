@@ -65,6 +65,8 @@
       padding: 6px;
       font-size: 1em;
     }
+    .serif {font-family: serif;}
+    .sans {font-family:sans-serif:}
   </style>
 </head>
 <body>
@@ -89,6 +91,7 @@
       <option value="Strikethrough">Strikethrough</option>
       <option value="Capital">Capital</option>
       <option value="Underscore">Underscore</option>
+      <option value="Font">Font (serif/Sans)</option>
     </select>
 
     <button id="encodeBtn">Encode</button>
@@ -260,8 +263,10 @@
           case 'Strikethrough':modeTag = 'S';  break; // using <s>
           case 'Underscore':   modeTag = 'U';  break; // using <u>
           case 'Capital':      modeTag = null; break;
+          case 'Font':         modeTag = null; break;
         }
         const isCapitalMode = (mode === 'Capital');
+        const isFontMode = (mode === 'Font');
 
         // 5. Walk through coverText, mapping each letter to one bit
         const frag = document.createDocumentFragment();
@@ -276,7 +281,14 @@
                 // bit=1 → uppercase; bit=0 → lowercase
                 let outChar = (bit === 1) ? ch.toUpperCase() : ch.toLowerCase();
                 frag.appendChild(document.createTextNode(outChar));
-              } else {
+              } else if (isFontMode){
+                let span = document.createElement('span');
+                span.className = bit === 1 ? 'serif' : 'sans';
+                span.textContent = ch;
+                frag.appendChild(span);
+              }
+
+              else {
                 if (bit === 1) {
                   // Wrap in chosen tag
                   let el;
@@ -323,13 +335,20 @@
           case 'Strikethrough':modeTag = 'S';  break;
           case 'Underscore':   modeTag = 'U';  break;
           case 'Capital':      modeTag = null; break;
+          case 'Font':         modeTag = null; break;
         }
         const isCapitalMode = (mode === 'Capital');
+        const isFontMode = (mode === 'Font');
 
         // 1. Traverse outputDiv to collect bits per letter
         let bitsArr = [];
         function recurse(node, inFormatting) {
           for (let child of node.childNodes) {
+              if (child.nodeType === 1 && child.tagName === 'SPAN' && isFontMode) {
+                // descend but remember formatting by class:
+                let nowSerif = child.classList.contains('serif');
+                recurse(child, nowSerif);
+              }
             if (child.nodeType === Node.ELEMENT_NODE) {
               // If this element matches our chosen formatting tag, mark formatting= true
               let nextFormatting = inFormatting;
