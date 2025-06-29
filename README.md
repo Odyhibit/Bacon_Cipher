@@ -1,1 +1,1 @@
-This is just a basci Bacon Cipher.
+This is just a basic Bacon Cipher.
