@@ -1,134 +1,456 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Face Yaw Classifier</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.14.0/tf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow-models/4.14.0/face-landmarks-detection.min.js"></script>
-  <style>
-    body { background: #1e1e1e; color: white; text-align: center; font-family: Arial, sans-serif; }
-    canvas { max-width: 100%; border: 1px solid #333; }
-    #status { white-space: pre-line; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Detection & Bacon Cipher Decoder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #007bff;
+        }
+        .upload-area.dragover {
+            border-color: #007bff;
+            background: #f0f8ff;
+        }
+        #imagePreview {
+            max-width: 100%;
+            max-height: 500px;
+            margin: 20px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .canvas-container {
+            position: relative;
+            display: inline-block;
+            margin: 20px 0;
+        }
+        #canvas {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            max-width: 100%;
+        }
+        .results {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+        .binary-string {
+            font-family: monospace;
+            font-size: 14px;
+            word-break: break-all;
+            background: #fff;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+        .decoded-message {
+            font-size: 18px;
+            font-weight: bold;
+            color: #007bff;
+            margin: 10px 0;
+            padding: 15px;
+            background: #e7f3ff;
+            border-radius: 5px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .error {
+            color: #dc3545;
+            padding: 10px;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .face-info {
+            margin: 5px 0;
+            padding: 5px;
+            background: #fff;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+    </style>
 </head>
 <body>
-  <h1>Bacon Cipher Face Yaw Classifier</h1>
-  <input type="file" accept="image/*" id="imageUpload" />
-  <br><br>
-  <canvas id="canvas"></canvas>
-  <p id="status">Upload an image to begin...</p>
+    <div class="container">
+        <h1>Face Detection & Bacon Cipher Decoder</h1>
+        <p>Upload an image with faces to detect their orientation and decode a hidden message using the Bacon cipher.</p>
+        
+        <div class="upload-area" id="uploadArea">
+            <p>Drop an image here or click to select</p>
+            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+        </div>
+        
+        <div id="loadingStatus" class="loading" style="display: none;">
+            Loading face detection models...
+        </div>
+        
+        <img id="imagePreview" style="display: none;" alt="Preview">
+        
+        <div class="canvas-container">
+            <canvas id="canvas" style="display: none;"></canvas>
+        </div>
+        
+        <button id="analyzeBtn" style="display: none;" disabled>Analyze Faces</button>
+        
+        <div id="results" class="results" style="display: none;">
+            <h3>Results:</h3>
+            <div id="faceCount"></div>
+            <div id="faceDetails"></div>
+            <div>
+                <strong>Binary String:</strong>
+                <div id="binaryString" class="binary-string"></div>
+            </div>
+            <div>
+                <strong>Decoded Message:</strong>
+                <div id="decodedMessage" class="decoded-message"></div>
+            </div>
+        </div>
+        
+        <div id="error" class="error" style="display: none;"></div>
+    </div>
 
-  <script>
-    const fileInput = document.getElementById('imageUpload');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const status = document.getElementById('status');
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/face-api.min.js"></script>
+    <script>
+        let modelsLoaded = false;
+        let currentImage = null;
+        
+        // Wait for face-api.js to load
+        function waitForFaceApi() {
+            return new Promise((resolve, reject) => {
+                if (typeof faceapi !== 'undefined') {
+                    resolve();
+                    return;
+                }
+                
+                let attempts = 0;
+                const maxAttempts = 50;
+                const interval = setInterval(() => {
+                    attempts++;
+                    if (typeof faceapi !== 'undefined') {
+                        clearInterval(interval);
+                        resolve();
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(interval);
+                        reject(new Error('face-api.js failed to load'));
+                    }
+                }, 100);
+            });
+        }
+        
+        // Bacon cipher mapping (A=00000, B=00001, etc.)
+        const baconCipher = {
+            '00000': 'A', '00001': 'B', '00010': 'C', '00011': 'D', '00100': 'E',
+            '00101': 'F', '00110': 'G', '00111': 'H', '01000': 'I', '01001': 'J',
+            '01010': 'K', '01011': 'L', '01100': 'M', '01101': 'N', '01110': 'O',
+            '01111': 'P', '10000': 'Q', '10001': 'R', '10010': 'S', '10011': 'T',
+            '10100': 'U', '10101': 'V', '10110': 'W', '10111': 'X', '11000': 'Y',
+            '11001': 'Z'
+        };
 
-    let model;
-
-    async function loadModel() {
-      try {
-        status.innerText = "Loading model...";
-
-        // Wait for libraries to be available
-        let attempts = 0;
-        while ((typeof tf === 'undefined' || typeof faceLandmarksDetection === 'undefined') && attempts < 100) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
+        // Initialize face-api.js
+        async function loadModels() {
+            const loadingStatus = document.getElementById('loadingStatus');
+            loadingStatus.style.display = 'block';
+            loadingStatus.textContent = 'Loading face-api.js library...';
+            
+            try {
+                // Wait for face-api.js to be available
+                await waitForFaceApi();
+                
+                loadingStatus.textContent = 'Loading face detection models...';
+                
+                // Try multiple CDN sources for the models
+                const modelUrls = [
+                    'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights',
+                    'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights'
+                ];
+                
+                let modelsLoadedSuccessfully = false;
+                
+                for (const url of modelUrls) {
+                    try {
+                        await Promise.all([
+                            faceapi.nets.tinyFaceDetector.loadFromUri(url),
+                            faceapi.nets.faceLandmark68Net.loadFromUri(url)
+                        ]);
+                        modelsLoadedSuccessfully = true;
+                        break;
+                    } catch (error) {
+                        console.warn(`Failed to load from ${url}:`, error);
+                    }
+                }
+                
+                if (!modelsLoadedSuccessfully) {
+                    throw new Error('Failed to load models from all CDN sources');
+                }
+                
+                modelsLoaded = true;
+                loadingStatus.style.display = 'none';
+                document.getElementById('analyzeBtn').disabled = false;
+                console.log('Models loaded successfully');
+            } catch (error) {
+                console.error('Error loading models:', error);
+                showError('Failed to load face detection models. This might be due to network issues. Please check your internet connection and refresh the page.');
+                loadingStatus.style.display = 'none';
+            }
         }
 
-        if (typeof faceLandmarksDetection === 'undefined') {
-          throw new Error('Face landmarks detection library failed to load. Please check your internet connection.');
+        // File upload handling
+        const fileInput = document.getElementById('fileInput');
+        const uploadArea = document.getElementById('uploadArea');
+        const imagePreview = document.getElementById('imagePreview');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showError('Please select a valid image file.');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+                canvas.style.display = 'block';
+                document.getElementById('analyzeBtn').style.display = 'block';
+                
+                imagePreview.onload = () => {
+                    canvas.width = imagePreview.naturalWidth;
+                    canvas.height = imagePreview.naturalHeight;
+                    ctx.drawImage(imagePreview, 0, 0);
+                    currentImage = imagePreview;
+                };
+            };
+            reader.readAsDataURL(file);
         }
 
-        console.log('Loading MediaPipe FaceMesh model...');
-        model = await faceLandmarksDetection.load(
-          faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-          {
-            runtime: 'tfjs',
-            refineLandmarks: false
-          }
-        );
-        status.innerText = "Model loaded. Upload an image.";
-        console.log('Model loaded successfully');
-      } catch (error) {
-        status.innerText = "Error loading model: " + error.message;
-        console.error('Model loading error:', error);
-      }
-    }
+        // Face analysis
+        document.getElementById('analyzeBtn').addEventListener('click', analyzeFaces);
 
-    async function estimateHeadYaw(keypoints) {
-      // MediaPipe face mesh uses numbered keypoints
-      // Left eye corner: point 33, Right eye corner: point 263
-      const leftEye = keypoints[33];
-      const rightEye = keypoints[263];
+        async function analyzeFaces() {
+            if (!modelsLoaded || !currentImage) {
+                showError('Please wait for models to load and select an image.');
+                return;
+            }
 
-      if (!leftEye || !rightEye) return 0;
+            const loadingStatus = document.getElementById('loadingStatus');
+            loadingStatus.style.display = 'block';
+            loadingStatus.textContent = 'Analyzing faces...';
 
-      const dx = rightEye.x - leftEye.x;
-      const dy = rightEye.y - leftEye.y;
-      return Math.atan2(dy, dx) * (180 / Math.PI);
-    }
+            try {
+                // Detect faces with landmarks
+                const detections = await faceapi
+                    .detectAllFaces(currentImage, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.3 }))
+                    .withFaceLandmarks();
 
-    async function handleImage(file) {
-      if (!model) {
-        status.innerText = "Model not loaded yet.";
-        return;
-      }
+                console.log(`Detected ${detections.length} faces`);
 
-      status.innerText = "Processing image...";
+                // Draw detection boxes and analyze orientation
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(currentImage, 0, 0);
 
-      const img = new Image();
-      img.src = URL.createObjectURL(file);
-      img.onload = async () => {
-        try {
-          canvas.width = img.width;
-          canvas.height = img.height;
-          ctx.drawImage(img, 0, 0);
+                const faces = [];
+                detections.forEach((detection, index) => {
+                    const box = detection.detection.box;
+                    const landmarks = detection.landmarks;
+                    
+                    // Draw bounding box
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(box.x, box.y, box.width, box.height);
+                    
+                    // Draw face number
+                    ctx.fillStyle = '#ff0000';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(index + 1, box.x, box.y - 5);
 
-          const predictions = await model.estimateFaces(img);
-          let bitString = "";
+                    // Analyze face orientation
+                    const isFrontal = analyzeFaceOrientation(landmarks);
+                    const binaryValue = isFrontal ? '0' : '1';
+                    
+                    faces.push({
+                        index: index + 1,
+                        box: box,
+                        isFrontal: isFrontal,
+                        binaryValue: binaryValue,
+                        confidence: detection.detection.score
+                    });
 
-          for (const face of predictions) {
-            const yaw = await estimateHeadYaw(face.keypoints);
-            const box = face.box;
-            const isFront = Math.abs(yaw) < 20;
-            bitString += isFront ? "0" : "1";
+                    // Draw orientation indicator
+                    ctx.fillStyle = isFrontal ? '#00ff00' : '#ff8800';
+                    ctx.fillText(binaryValue, box.x + box.width - 20, box.y + 20);
+                });
 
-            ctx.strokeStyle = isFront ? "#00ff00" : "#ff0000";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(box.xMin, box.yMin, box.width, box.height);
-            ctx.fillStyle = "white";
-            ctx.font = "16px Arial";
-            ctx.fillText(`Yaw: ${yaw.toFixed(1)}°`, box.xMin, box.yMin - 5);
-          }
+                // Sort faces by position (top to bottom, left to right)
+                faces.sort((a, b) => {
+                    const rowDiff = Math.abs(a.box.y - b.box.y);
+                    if (rowDiff < 50) { // Same row, sort by x
+                        return a.box.x - b.box.x;
+                    }
+                    return a.box.y - b.box.y; // Different rows, sort by y
+                });
 
-          status.innerText = `Detected ${predictions.length} faces\nBits: ${bitString}`;
+                // Generate binary string and decode
+                const binaryString = faces.map(f => f.binaryValue).join('');
+                const decodedMessage = decodeBacon(binaryString);
 
-          // Clean up object URL
-          URL.revokeObjectURL(img.src);
-        } catch (error) {
-          status.innerText = "Error processing image: " + error.message;
-          console.error('Image processing error:', error);
+                displayResults(faces, binaryString, decodedMessage);
+                loadingStatus.style.display = 'none';
+
+            } catch (error) {
+                console.error('Error analyzing faces:', error);
+                showError('Error analyzing faces: ' + error.message);
+                loadingStatus.style.display = 'none';
+            }
         }
-      };
 
-      img.onerror = () => {
-        status.innerText = "Error loading image.";
-        URL.revokeObjectURL(img.src);
-      };
-    }
+        function analyzeFaceOrientation(landmarks) {
+            // Get key facial landmarks
+            const nose = landmarks.getNose();
+            const leftEye = landmarks.getLeftEye();
+            const rightEye = landmarks.getRightEye();
+            const mouth = landmarks.getMouth();
 
-    fileInput.addEventListener('change', e => {
-      if (e.target.files.length > 0) {
-        handleImage(e.target.files[0]);
-      }
-    });
+            // Calculate the center points
+            const noseCenter = getCenter(nose);
+            const leftEyeCenter = getCenter(leftEye);
+            const rightEyeCenter = getCenter(rightEye);
+            const mouthCenter = getCenter(mouth);
 
-    // Load model when page loads
-    window.addEventListener('load', () => {
-      setTimeout(loadModel, 1000); // Give scripts time to load
-    });
-  </script>
+            // Calculate face symmetry
+            const eyeDistance = Math.abs(leftEyeCenter.x - rightEyeCenter.x);
+            const noseToLeftEye = Math.abs(noseCenter.x - leftEyeCenter.x);
+            const noseToRightEye = Math.abs(noseCenter.x - rightEyeCenter.x);
+            
+            // Calculate asymmetry ratio
+            const asymmetryRatio = Math.abs(noseToLeftEye - noseToRightEye) / eyeDistance;
+            
+            // Also check if both eyes are clearly visible
+            const eyeVisibilityThreshold = 0.3;
+            const bothEyesVisible = eyeDistance > eyeVisibilityThreshold * 100;
+
+            // Face is frontal if it's relatively symmetric and both eyes are visible
+            return asymmetryRatio < 0.3 && bothEyesVisible;
+        }
+
+        function getCenter(points) {
+            const x = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+            const y = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+            return { x, y };
+        }
+
+        function decodeBacon(binaryString) {
+            let decoded = '';
+            for (let i = 0; i < binaryString.length; i += 5) {
+                const chunk = binaryString.substring(i, i + 5);
+                if (chunk.length === 5) {
+                    const letter = baconCipher[chunk];
+                    decoded += letter || '?';
+                }
+            }
+            return decoded;
+        }
+
+        function displayResults(faces, binaryString, decodedMessage) {
+            const results = document.getElementById('results');
+            const faceCount = document.getElementById('faceCount');
+            const faceDetails = document.getElementById('faceDetails');
+            const binaryStringDiv = document.getElementById('binaryString');
+            const decodedMessageDiv = document.getElementById('decodedMessage');
+
+            faceCount.textContent = `Found ${faces.length} faces`;
+            
+            faceDetails.innerHTML = faces.map(face => 
+                `<div class="face-info">Face ${face.index}: ${face.isFrontal ? 'Frontal (0)' : 'Profile (1)'} - Confidence: ${(face.confidence * 100).toFixed(1)}%</div>`
+            ).join('');
+
+            binaryStringDiv.textContent = binaryString;
+            decodedMessageDiv.textContent = decodedMessage || 'No valid message found';
+
+            results.style.display = 'block';
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        // Load models on page load
+        window.addEventListener('load', () => {
+            setTimeout(loadModels, 500); // Give the page a moment to fully load
+        });
+    </script>
 </body>
 </html>
