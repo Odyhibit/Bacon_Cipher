@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Face Yaw Classifier</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.14.0/tf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow-models/4.14.0/face-landmarks-detection.min.js"></script>
+  <style>
+    body { background: #1e1e1e; color: white; text-align: center; font-family: Arial, sans-serif; }
+    canvas { max-width: 100%; border: 1px solid #333; }
+    #status { white-space: pre-line; }
+  </style>
+</head>
+<body>
+  <h1>Bacon Cipher Face Yaw Classifier</h1>
+  <input type="file" accept="image/*" id="imageUpload" />
+  <br><br>
+  <canvas id="canvas"></canvas>
+  <p id="status">Upload an image to begin...</p>
+
+  <script>
+    const fileInput = document.getElementById('imageUpload');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const status = document.getElementById('status');
+
+    let model;
+
+    async function loadModel() {
+      try {
+        status.innerText = "Loading model...";
+
+        // Wait for libraries to be available
+        let attempts = 0;
+        while ((typeof tf === 'undefined' || typeof faceLandmarksDetection === 'undefined') && attempts < 100) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          attempts++;
+        }
+
+        if (typeof faceLandmarksDetection === 'undefined') {
+          throw new Error('Face landmarks detection library failed to load. Please check your internet connection.');
+        }
+
+        console.log('Loading MediaPipe FaceMesh model...');
+        model = await faceLandmarksDetection.load(
+          faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+          {
+            runtime: 'tfjs',
+            refineLandmarks: false
+          }
+        );
+        status.innerText = "Model loaded. Upload an image.";
+        console.log('Model loaded successfully');
+      } catch (error) {
+        status.innerText = "Error loading model: " + error.message;
+        console.error('Model loading error:', error);
+      }
+    }
+
+    async function estimateHeadYaw(keypoints) {
+      // MediaPipe face mesh uses numbered keypoints
+      // Left eye corner: point 33, Right eye corner: point 263
+      const leftEye = keypoints[33];
+      const rightEye = keypoints[263];
+
+      if (!leftEye || !rightEye) return 0;
+
+      const dx = rightEye.x - leftEye.x;
+      const dy = rightEye.y - leftEye.y;
+      return Math.atan2(dy, dx) * (180 / Math.PI);
+    }
+
+    async function handleImage(file) {
+      if (!model) {
+        status.innerText = "Model not loaded yet.";
+        return;
+      }
+
+      status.innerText = "Processing image...";
+
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = async () => {
+        try {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+
+          const predictions = await model.estimateFaces(img);
+          let bitString = "";
+
+          for (const face of predictions) {
+            const yaw = await estimateHeadYaw(face.keypoints);
+            const box = face.box;
+            const isFront = Math.abs(yaw) < 20;
+            bitString += isFront ? "0" : "1";
+
+            ctx.strokeStyle = isFront ? "#00ff00" : "#ff0000";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(box.xMin, box.yMin, box.width, box.height);
+            ctx.fillStyle = "white";
+            ctx.font = "16px Arial";
+            ctx.fillText(`Yaw: ${yaw.toFixed(1)}°`, box.xMin, box.yMin - 5);
+          }
+
+          status.innerText = `Detected ${predictions.length} faces\nBits: ${bitString}`;
+
+          // Clean up object URL
+          URL.revokeObjectURL(img.src);
+        } catch (error) {
+          status.innerText = "Error processing image: " + error.message;
+          console.error('Image processing error:', error);
+        }
+      };
+
+      img.onerror = () => {
+        status.innerText = "Error loading image.";
+        URL.revokeObjectURL(img.src);
+      };
+    }
+
+    fileInput.addEventListener('change', e => {
+      if (e.target.files.length > 0) {
+        handleImage(e.target.files[0]);
+      }
+    });
+
+    // Load model when page loads
+    window.addEventListener('load', () => {
+      setTimeout(loadModel, 1000); // Give scripts time to load
+    });
+  </script>
+</body>
+</html>
